@@ -162,6 +162,9 @@ deprecated on Debian. Use `command -v`. Replace `echo -e`/`-n` with
 
 - 2026-09-27: #1, #4 and #5 fixed; the `which`/`echo` part of #12 fixed.
   `tests/smoke.sh` (`make check`) covers them.
+- 2026-09-27: #2, #3, #8, #9 and #11 fixed, each with a test in
+  `tests/smoke.sh`. The HTML colours are still written into the awk
+  program, but they are constants set at the top of the script, not data.
 
 ## Suggested order of work
 

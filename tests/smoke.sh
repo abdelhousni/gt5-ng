@@ -1,6 +1,7 @@
 #!/bin/sh
-# Smoke test for gt5: scan a generated directory tree under every
-# available POSIX shell and check the HTML report.
+# Smoke test for gt5: scan generated directory trees under every
+# available POSIX shell and check the HTML report, including hostile
+# and unusual file and directory names.
 #
 # Usage: tests/smoke.sh [path/to/gt5]
 #
@@ -19,6 +20,8 @@ mkdir "$WORK/bin"
 cat > "$WORK/bin/browser" <<'EOT'
 #!/bin/sh
 cp "$1" "$OUT"
+#for the signal test: tell where the report is, then take a while
+[ -z "$SLOW" ] || { dirname "$1" > "$SLOW"; sleep 2; }
 EOT
 chmod +x "$WORK/bin/browser"
 
@@ -42,6 +45,8 @@ check_stderr() {
 }
 
 has() { grep -e "$1" "$WORK/out.html" > /dev/null 2>&1; }
+has_text() { grep -F -e "$1" "$WORK/out.html" > /dev/null 2>&1; }
+mkfile() { dd if=/dev/zero of="$1" bs=1024 count="$2" 2> /dev/null; }
 
 run_suite() {
   rm -rf "${WORK:?}/home" "${WORK:?}/data"
@@ -84,6 +89,86 @@ run_suite() {
   rm -f "$WORK/saved.html"
 }
 
+#hostile or unusual names: see docs/AUDIT.md, findings 2, 3, 8, 9, 11
+run_security() {
+  rm -rf "${WORK:?}/home" "${WORK:?}/sec"
+  mkdir -p "$WORK/home" "$WORK/sec"
+
+  #a directory name that used to be executed as awk code
+  evil="$WORK/sec/evil\"system(\"touch PWNED\")\""
+  mkdir "$evil" && mkfile "$evil/x" 20
+  gt5 "$evil"; check_stderr "awk injection"
+  if [ -e "$evil/PWNED" ] || [ -e "$WORK/sec/PWNED" ]; then
+    fail "directory name was executed as awk code"
+  elif has '\./x' && has_text 'evil&quot;system(&quot;touch PWNED&quot;)&quot;'; then
+    pass "directory name with quotes is data, not code"
+  else
+    fail "awk injection: report incomplete"
+  fi
+
+  #'%' used to be read as a printf format
+  mkdir "$WORK/sec/p%sq" && mkfile "$WORK/sec/p%sq/y" 20
+  gt5 "$WORK/sec/p%sq"; check_stderr "percent in path"
+  if has '\./y' && has_text 'p%sq)'; then
+    pass "'%' in the path"
+  else
+    fail "'%' in the path"
+  fi
+
+  #backslashes used to be interpreted by echo and awk
+  mkdir "$WORK/sec/back\tslash" && mkfile "$WORK/sec/back\tslash/z" 20
+  gt5 "$WORK/sec/back\tslash"; check_stderr "backslash in path"
+  if has '\./z' && has_text 'back\tslash)'; then
+    pass "backslash in the path"
+  else
+    fail "backslash in the path"
+  fi
+
+  #file names must be HTML-escaped, and file links URL-encoded
+  mkdir "$WORK/sec/h"
+  mkfile "$WORK/sec/h/<b>bold" 20; mkfile "$WORK/sec/h/a&b" 20
+  mkfile "$WORK/sec/h/sp ace#1" 20
+  gt5 --link-files "$WORK/sec/h"; check_stderr "HTML escaping"
+  if has_text '<b>bold'; then
+    fail "file name written into the report as raw HTML"
+  elif has_text '&lt;b&gt;bold' && has_text 'a&amp;b'; then
+    pass "file names are HTML-escaped"
+  else
+    fail "HTML escaping: names missing from report"
+  fi
+  if has_text '/sec/h/sp%20ace%231"'; then
+    pass "--link-files links are URL-encoded"
+  else
+    fail "--link-files links are not URL-encoded"
+  fi
+
+  #paths with regex characters: diff a subdirectory against its parent
+  sub="$WORK/sec/r/a+b (c)"
+  mkdir -p "$sub" && mkfile "$sub/f" 20
+  gt5 "$WORK/sec/r" && gt5 "$sub"; check_stderr "regex characters"
+  if has 'last check was on' && has '\./f' && ! has '\./f .*>new<'; then
+    pass "subdirectory with regex characters diffs against its parent"
+  else
+    fail "subdirectory with regex characters: no diff against its parent"
+  fi
+
+  #temporary files are removed when gt5 is killed with SIGHUP
+  rm -f "$WORK/tmpdir"
+  HOME="$WORK/home" OUT="$WORK/out.html" GT5_BROWSER="$WORK/bin/browser" \
+    SLOW="$WORK/tmpdir" $SHELL_CMD "$GT5" "$WORK/sec/h" > /dev/null 2>&1 &
+  pid=$!
+  n=0; while [ ! -s "$WORK/tmpdir" ] && [ $n -lt 20 ]; do sleep 1; n=$((n+1)); done
+  kill -HUP "$pid" 2> /dev/null; wait "$pid" 2> /dev/null
+  if [ ! -s "$WORK/tmpdir" ]; then
+    fail "signal test: browser was not started"
+  elif [ -d "$(cat "$WORK/tmpdir")" ]; then
+    fail "temporary directory left behind after SIGHUP"
+    rm -rf "$(cat "$WORK/tmpdir")"
+  else
+    pass "temporary directory removed after SIGHUP"
+  fi
+}
+
 tested=0
 for SHELL_CMD in sh dash bash "busybox sh" ksh mksh zsh; do
   command -v "${SHELL_CMD%% *}" > /dev/null 2>&1 || continue
@@ -91,6 +176,7 @@ for SHELL_CMD in sh dash bash "busybox sh" ksh mksh zsh; do
   [ "$SHELL_CMD" = zsh ] && SHELL_CMD="zsh --emulate sh"
   echo "== $SHELL_CMD"
   run_suite
+  run_security
   tested=$((tested+1))
 done
 
