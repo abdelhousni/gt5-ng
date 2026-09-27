@@ -1,3 +1,7 @@
+# Original gt5 by Thomas Sattler, https://gt5.sourceforge.net/
+# Modified by abdel.h for gt5-ng, 2026-09-27: added the 'check' target.
+# Licensed under the GNU General Public License version 2.
+
 TARGET  = gt5
 VERSION = 1.4.0
 PREFIX  ?= /usr/local
@@ -7,6 +11,9 @@ SHARE   ?= $(PREFIX)/share/$(TARGET)-$(VERSION)
 build:
 	@echo nothing to build, gt5 is a shell-script
 	@echo run 'make [un]install to [un]install'
+
+check:
+	sh tests/smoke.sh ./$(TARGET)
 
 install:
 	install -o root -g root -m 755 -d $(DESTDIR)$(MAN)

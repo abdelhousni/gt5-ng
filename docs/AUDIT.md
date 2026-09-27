@@ -158,6 +158,11 @@ deprecated on Debian. Use `command -v`. Replace `echo -e`/`-n` with
 - `--save-as` creates the file before validating anything.
 - Line 371 calls plain `awk` instead of `"$AWK"`.
 
+## Progress
+
+- 2026-09-27: #1, #4 and #5 fixed; the `which`/`echo` part of #12 fixed.
+  `tests/smoke.sh` (`make check`) covers them.
+
 ## Suggested order of work
 
 1. **Make it run:** fix #1 (depth option) and #4 (POSIX `sh`), with a
