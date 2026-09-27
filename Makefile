@@ -1,5 +1,6 @@
 # Original gt5 by Thomas Sattler, https://gt5.sourceforge.net/
-# Modified by abdel.h for gt5-ng, 2026-09-27: added the 'check' target.
+# Modified by abdel.h for gt5-ng, 2026-09-27: added the 'check' and 'lint'
+# targets.
 # Licensed under the GNU General Public License version 2.
 
 TARGET  = gt5
@@ -14,6 +15,9 @@ build:
 
 check:
 	sh tests/smoke.sh ./$(TARGET)
+
+lint:
+	shellcheck -s sh $(TARGET) tests/smoke.sh
 
 install:
 	install -o root -g root -m 755 -d $(DESTDIR)$(MAN)

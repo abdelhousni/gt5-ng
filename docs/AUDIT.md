@@ -165,6 +165,10 @@ deprecated on Debian. Use `command -v`. Replace `echo -e`/`-n` with
 - 2026-09-27: #2, #3, #8, #9 and #11 fixed, each with a test in
   `tests/smoke.sh`. The HTML colours are still written into the awk
   program, but they are constants set at the top of the script, not data.
+- 2026-09-27: #6 and #13 fixed, #12 finished; `shellcheck -s sh gt5` is
+  clean (SC2016 is disabled file-wide, since the awk programs are
+  single-quoted on purpose). CI runs the tests under five shells.
+  Open: #7 (BSD/macOS) and #10 (newlines in file names).
 
 ## Suggested order of work
 

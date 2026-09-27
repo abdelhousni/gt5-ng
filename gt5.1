@@ -1,3 +1,8 @@
+.\" Original gt5 by Thomas Sattler, https://gt5.sourceforge.net/
+.\" Modified by abdel.h for gt5-ng, 2026-09-27: removed the broken
+.\" --get-* helpers, documented --help, --version, exit status and
+.\" the new option limits.
+.\" Licensed under the GNU General Public License version 2.
 .TH gt5 1 "August 2007" "gt5 v1.4.0"
 .SH NAME
 gt5 \- a diff\-capable 'du\-browser'
@@ -55,6 +60,8 @@ Only consider the
 .I int
 biggest files and directories within the output of
 .IR du .
+Default is
+.IR 10000 .
 .IP \-\-no\-diffs
 Use this if you are not interested in the history of the directories processed,
 for example in /tmp.
@@ -72,6 +79,10 @@ Force saving current state, overwriting a previous
 .IR \-\-discard .
 (Some people seem to have gt5 aliased to
 .IR "'gt5 \-\-discard'" .)
+.IP \-\-help
+Show a short help and exit.
+.IP \-\-version
+Show the version and exit.
 .IP \-\-with\-mounts
 By default gt5 calls
 .B du
@@ -81,26 +92,6 @@ to ignore mounted filesystems. Use this to inspect mounted partitions too, i.e. 
 .B du
 with
 .B \-ak
-.SH HELPERS
-If
-.I gawk
-or a
-.I textbrowser
-are missing and you want to install them into
-.IR "~/bin " "(or " "/usr/local/bin " "if you have write access there), " gt5
-comes with the following helpers:
-.IP \-\-get\-gawk
-Download, compile and install a copy of
-.IR gawk .
-.IP \-\-get\-links
-Download, compile and install a copy of
-.IR links .
-.IP \-\-get\-links2
-Download, compile and install a copy of
-.IR links2 .
-.IP \-\-get\-elinks
-Download, compile and install a copy of
-.IR elinks .
 .SH TEXTBROWSERS
 It is recommended to use
 .IR "links " "with " gt5 .
@@ -145,6 +136,9 @@ force using a (specific) textbrowser
 .IP GT5_CHARSET
 force using a (specific) charset for HTML header instead of using
 .I $LANG
+.SH "EXIT STATUS"
+0 on success, 1 on an error (such as a bad option value or a missing
+program), 2 on a usage error.
 .SH BUGS
 Directories at depth
 .B max\-depth

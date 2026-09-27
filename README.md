@@ -16,10 +16,12 @@ for provenance.
 
 ## Status
 
-The repository currently holds the unmodified upstream 1.4.0 release
-(git tag `upstream/1.4.0`). The upstream documentation is kept as released:
-[`README`](README), [`INSTALL`](INSTALL), [`Changelog`](Changelog) and the
-man page [`gt5.1`](gt5.1).
+The unmodified upstream 1.4.0 release is tagged `upstream/1.4.0`. Since
+then gt5-ng has fixed gt5 on current Linux systems, closed a command
+execution hole and cleaned up option handling (see the changelog). The
+upstream [`README`](README), [`INSTALL`](INSTALL) and
+[`Changelog`](Changelog) are kept as released; the man page
+[`gt5.1`](gt5.1) is updated for the changed options.
 
 ## Install
 
@@ -29,6 +31,15 @@ sudo make uninstall
 ```
 
 `gt5` is a single shell script, so you can also copy it anywhere on your `PATH`.
+
+## Development
+
+```sh
+make check   # smoke test under every installed POSIX shell
+make lint    # ShellCheck
+```
+
+See [`docs/AUDIT.md`](docs/AUDIT.md) for known issues and progress.
 
 ## Usage
 

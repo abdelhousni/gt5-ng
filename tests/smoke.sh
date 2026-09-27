@@ -89,6 +89,37 @@ run_suite() {
   rm -f "$WORK/saved.html"
 }
 
+#expect: status "$1", then gt5 arguments; checks the exit status only
+expect_status() {
+  want=$1; shift
+  gt5 "$@"; got=$?
+  if [ "$got" = "$want" ]; then pass "gt5 $* -> exit $want"
+  else fail "gt5 $* -> exit $got, expected $want"; sed 's/^/        /' "$WORK/err"; fi
+}
+
+#option parsing: see docs/AUDIT.md, findings 5, 6 and 13
+run_options() {
+  rm -rf "${WORK:?}/home"; mkdir -p "$WORK/home"
+  expect_status 0 --help
+  expect_status 0 --cut-at 0.10 --version
+  expect_status 0 --cut-at 30 --version
+  expect_status 1 --cut-at 30.5
+  expect_status 1 --cut-at 0.001
+  expect_status 1 --cut-at abc
+  expect_status 0 --max-lines 500 --version
+  expect_status 1 --max-lines 0
+  expect_status 1 --save-as "$WORK/no/such/dir/x"
+  expect_status 1 --save-as "$WORK"
+  expect_status 1 --diff-dir
+  expect_status 2 --get-links
+  expect_status 2 "$WORK/no/such/dir"
+  if grep -q '^gt5: ' "$WORK/err" || [ -s "$WORK/log" ]; then
+    fail "usage errors must print the help on stderr only"
+  else
+    pass "usage errors print the help on stderr"
+  fi
+}
+
 #hostile or unusual names: see docs/AUDIT.md, findings 2, 3, 8, 9, 11
 run_security() {
   rm -rf "${WORK:?}/home" "${WORK:?}/sec"
@@ -177,6 +208,7 @@ for SHELL_CMD in sh dash bash "busybox sh" ksh mksh zsh; do
   echo "== $SHELL_CMD"
   run_suite
   run_security
+  run_options
   tested=$((tested+1))
 done
 

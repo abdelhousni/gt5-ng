@@ -5,6 +5,22 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
 
 ## [Unreleased]
 
+### Changed
+- Errors go to stderr, prefixed with `gt5:`, with exit status 1; usage
+  errors print the help on stderr with exit status 2. New `-h`/`--help`
+  prints the help on stdout and exits 0.
+- `--cut-at` accepts any decimal number from 0.01 to 30 (1.4.0 rejected
+  e.g. `0.10` and accepted `39.9`).
+- `--max-lines` accepts any value from 1 (1.4.0 required at least 10000).
+- `--save-as` checks that the file can be written up front, but no longer
+  creates it until the report is ready. `--diff-dir`, `--save-as` and
+  `--save-du-as` report a missing argument instead of misbehaving.
+
+### Removed
+- The `--get-awk`, `--get-gawk`, `--get-links`, `--get-links2` and
+  `--get-elinks` options. They called a function that did not exist in
+  1.4.0; install the tools with your package manager instead.
+
 ### Security
 - A crafted directory name could run arbitrary commands: gt5 pasted the
   directory path (and the date, charset and other values) into the awk
@@ -42,7 +58,10 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
 - `tests/smoke.sh` and `make check`: scans a generated directory tree under
   every available POSIX shell and checks the report, diffs and `--save-as`,
   plus hostile and unusual names (quotes, `%`, backslashes, HTML, regex
-  characters) and cleanup after SIGHUP.
+  characters), cleanup after SIGHUP, and option parsing.
+- `make lint` (ShellCheck; `gt5` is now clean with `-s sh`) and a GitHub
+  Actions workflow running `make lint` and `make check` under sh, dash,
+  bash, busybox sh and ksh.
 
 ## upstream/1.4.0 — imported 2026-09-27
 
