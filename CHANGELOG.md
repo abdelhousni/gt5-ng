@@ -9,6 +9,8 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
 - `README.md`, `NOTICE.md` and this changelog, identifying the project as an
   unofficial fork of gt5 by Thomas Sattler, recording the upstream source
   and stating the license (GPL-2.0-only).
+- `docs/AUDIT.md`: audit of the upstream 1.4.0 script (bugs, security,
+  portability, ShellCheck) and the planned order of fixes.
 
 ## upstream/1.4.0 — imported 2026-09-27
 
