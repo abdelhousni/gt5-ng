@@ -9,7 +9,8 @@
 #   - security: never build awk code from paths or other data (a crafted
 #     directory name could run commands), escape names in the HTML, match
 #     paths literally, and clean up temporary files on signals
-#   - portability: BSD/macOS stat and date for the time of the last run
+#   - portability: BSD/macOS stat and date for the time of the last run,
+#     and du without "-a -d" (not allowed together on BSD/macOS)
 #   - clean-up: remove the broken --get-* options, relax option limits,
 #     report errors on stderr with a non-zero exit status, ShellCheck clean
 # See CHANGELOG.md for the full list of changes.
@@ -325,16 +326,27 @@ if [ "$CD" ]; then P="$(uname -n):$PWD"; else P="file: $F1"; fi
 if [ -z "$CD$F2" ] || [ -z "$F1" ]; then DIFFS=0; fi
 [ "$CD" ] || unset LINK_FILES SAVE_DU
 
-#can du handle depths? (-d: current GNU and BSD, --max-depth: older GNU)
+#can du limit the depth together with -a? (-d: current GNU, --max-depth:
+#older GNU; BSD/macOS du refuses -a with -d, so there the depth limit is
+#applied by gt5_depth below instead)
 #(probe the empty $TMP, not ".", which could be huge)
 #$DEPTH is expanded unquoted below (SC2086), so "-d N" becomes two arguments
-if du -d 0 "$TMP" > /dev/null 2>&1; then
+if du -ak -d 0 "$TMP" > /dev/null 2>&1; then
   DEPTH="-d $((MAX_DEPTH+1))"
-elif du --max-depth=0 "$TMP" > /dev/null 2>&1; then
+elif du -ak --max-depth=0 "$TMP" > /dev/null 2>&1; then
   DEPTH="--max-depth=$((MAX_DEPTH+1))"
 else
   unset DEPTH
 fi
+
+gt5_depth() {
+  #drop du lines deeper than max-depth+1 ("./a" is depth 1); a no-op when
+  #du already limited the depth
+  "$AWK" -v max="$((MAX_DEPTH+1))" '{
+    p = substr($0, index($0, "\t")+1)
+    if (gsub(/\//, "/", p) <= max) print
+  }'
+}
 
 {
 
@@ -342,7 +354,7 @@ fi
   [ "$CD" ] && { gt5_timer_start
     printf '%s' "processing \"$(gt5_tilde "$PWD")\", please be patient ... " 1>&2
     # shellcheck disable=SC2086
-    du "-ak$X" $DEPTH 2> /dev/null | grep -v ^0 | tee "$TMP/this" | sed "s,^,$ID ,"
+    du "-ak$X" $DEPTH 2> /dev/null | grep -v ^0 | gt5_depth | tee "$TMP/this" | sed "s,^,$ID ,"
     ID=$((ID+1)); echo "done ${SAVE:+[$(gt5_timer)s]}" 1>&2
   }
 

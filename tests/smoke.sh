@@ -79,6 +79,18 @@ run_suite() {
     fail "second scan: no diff information"
   fi
 
+  #--max-depth: nothing deeper than max-depth+1 in the report
+  rm -rf "${WORK:?}/deep"; mkdir -p "$WORK/deep/a/b/c/d"
+  mkfile "$WORK/deep/a/b/c/d/leaf" 20; mkfile "$WORK/deep/top" 20
+  gt5 --max-depth 1 --no-diffs "$WORK/deep"; check_stderr "--max-depth"
+  #depth 1 shows ./a/ and, one level below, ./b as a leaf (see BUGS in gt5.1)
+  if has '\./top' && has '\./b *$' && ! has '\./c' && ! has '\./leaf' \
+      && ! has '\./<a href="#[0-9]*">[bc]</a>/'; then
+    pass "--max-depth limits the report"
+  else
+    fail "--max-depth does not limit the report"
+  fi
+
   #--save-as with an absolute path
   (cd "$WORK/data" && gt5 --save-as "$WORK/saved.html"); check_stderr "--save-as"
   if [ -s "$WORK/saved.html" ] && grep '\./big' "$WORK/saved.html" > /dev/null; then
@@ -224,7 +236,16 @@ EOT
   cat > "$WORK/bsd/du" <<EOT
 #!/bin/sh
 echo "du \$*" >> "$WORK/bsd.log"
-for a do case "\$a" in --*) echo "du: illegal option" 1>&2; exit 1;; esac; done
+all=; depth=
+for a do
+  case "\$a" in
+    --*) echo "du: illegal option" 1>&2; exit 1;;
+    -d) depth=1;;
+    -*a*) all=1;;
+  esac
+done
+#BSD du: usage: du [-a | -s | -d depth]
+[ "\$all\$depth" = 11 ] && { echo "du: -a and -d are mutually exclusive" 1>&2; exit 1; }
 exec "$real_du" "\$@"
 EOT
   chmod +x "$WORK/bsd/date" "$WORK/bsd/stat" "$WORK/bsd/du"
@@ -246,8 +267,8 @@ run_bsd() {
     fail "BSD-style date/stat/du: report or diff date wrong"
   fi
   if grep -q '^stat -f %m ' "$WORK/bsd.log" && grep -q '^date -r [0-9]' "$WORK/bsd.log" \
-      && grep -q '^du .*-d 6' "$WORK/bsd.log"; then
-    pass "BSD fallbacks used (stat -f, date -r SECONDS, du -d)"
+      && grep -q '^du -akx *$' "$WORK/bsd.log"; then
+    pass "BSD fallbacks used (stat -f, date -r SECONDS, du without -d)"
   else
     fail "BSD fallbacks not used:"; sed 's/^/        /' "$WORK/bsd.log"
   fi

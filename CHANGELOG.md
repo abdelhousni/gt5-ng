@@ -22,6 +22,10 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
   reads as a number of seconds. gt5 now gets the file time from `stat`
   (GNU/busybox `-c %Y`, BSD/macOS `-f %m`) and formats it with
   `date -d @N` or `date -r N`.
+- BSD and macOS: every report was empty, because BSD/macOS `du` refuses
+  `-a` together with `-d`. gt5 now probes that exact combination and,
+  where it is refused, runs `du` without a depth limit and drops the
+  deeper entries itself.
 - `make install` no longer sets owner `root:root`, which fails on
   BSD/macOS (root's group is `wheel`) and in unprivileged packaging
   builds; the man page and docs are installed mode 644 instead of 755.
