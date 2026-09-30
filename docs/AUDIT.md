@@ -169,6 +169,11 @@ deprecated on Debian. Use `command -v`. Replace `echo -e`/`-n` with
   clean (SC2016 is disabled file-wide, since the awk programs are
   single-quoted on purpose). CI runs the tests under five shells.
   Open: #7 (BSD/macOS) and #10 (newlines in file names).
+- 2026-09-30: #7 fixed: `stat`/`date` fallbacks for the last-run time and
+  a portable `make install`. Tested on Linux with emulated BSD
+  `date`/`stat`/`du`, with BSD awk (original-awk) and busybox awk, and
+  under zsh; CI adds a real macOS job. FreeBSD itself is not in CI.
+  Open: #10 (newlines in file names).
 
 ## Suggested order of work
 

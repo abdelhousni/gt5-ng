@@ -9,6 +9,7 @@
 #   - security: never build awk code from paths or other data (a crafted
 #     directory name could run commands), escape names in the HTML, match
 #     paths literally, and clean up temporary files on signals
+#   - portability: BSD/macOS stat and date for the time of the last run
 #   - clean-up: remove the broken --get-* options, relax option limits,
 #     report errors on stderr with a non-zero exit status, ShellCheck clean
 # See CHANGELOG.md for the full list of changes.
@@ -128,6 +129,19 @@ gt5_timer_start() {
 gt5_timer() {
   #print seconds since gt5_timer_start
   echo $(( $(date +%s) - START ))
+}
+
+gt5_mtime() {
+  #print a file's modification time in seconds since the epoch
+  #(GNU/busybox stat, BSD/macOS stat, then GNU date as a last resort)
+  stat -c %Y "$1" 2> /dev/null ||
+  stat -f %m "$1" 2> /dev/null ||
+  date -r "$1" +%s 2> /dev/null
+}
+
+gt5_date() {
+  #print seconds since the epoch as a date (GNU/busybox date, BSD/macOS date)
+  date -d "@$1" 2> /dev/null || date -r "$1" 2> /dev/null
 }
 
 #initial stuff: --------------------------------------------------------------
@@ -305,7 +319,8 @@ else
 
 fi
 
-[ -z "$F1" ] || { DATE=$(date -r "$F1"); SINCE=$(date -r "$F1" +%s); }
+#GNU 'date -r FILE' means "seconds since the epoch" on BSD/macOS
+[ -z "$F1" ] || { SINCE=$(gt5_mtime "$F1") && DATE=$(gt5_date "$SINCE"); }
 if [ "$CD" ]; then P="$(uname -n):$PWD"; else P="file: $F1"; fi
 if [ -z "$CD$F2" ] || [ -z "$F1" ]; then DIFFS=0; fi
 [ "$CD" ] || unset LINK_FILES SAVE_DU

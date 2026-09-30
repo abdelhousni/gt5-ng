@@ -200,6 +200,65 @@ run_security() {
   fi
 }
 
+#BSD/macOS userland: wrappers around the GNU tools that reject GNU-only
+#usage (date -d, date -r FILE, stat -c, du --long-options) and log calls
+make_bsd_shims() {
+  mkdir -p "$WORK/bsd"
+  real_date=$(command -v date); real_stat=$(command -v stat); real_du=$(command -v du)
+  cat > "$WORK/bsd/date" <<EOT
+#!/bin/sh
+echo "date \$*" >> "$WORK/bsd.log"
+for a do case "\$a" in -d*|--*) echo "date: illegal option" 1>&2; exit 1;; esac; done
+if [ "\$1" = -r ]; then
+  case "\$2" in ''|*[!0-9]*) echo "date: illegal time format" 1>&2; exit 1;; esac
+  n=\$2; shift 2; exec "$real_date" -d "@\$n" "\$@"
+fi
+exec "$real_date" "\$@"
+EOT
+  cat > "$WORK/bsd/stat" <<EOT
+#!/bin/sh
+echo "stat \$*" >> "$WORK/bsd.log"
+[ "\$1" = -f ] && [ "\$2" = %m ] && exec "$real_stat" -c %Y "\$3"
+echo "stat: illegal option" 1>&2; exit 1
+EOT
+  cat > "$WORK/bsd/du" <<EOT
+#!/bin/sh
+echo "du \$*" >> "$WORK/bsd.log"
+for a do case "\$a" in --*) echo "du: illegal option" 1>&2; exit 1;; esac; done
+exec "$real_du" "\$@"
+EOT
+  chmod +x "$WORK/bsd/date" "$WORK/bsd/stat" "$WORK/bsd/du"
+}
+
+#see docs/AUDIT.md, finding 7
+run_bsd() {
+  rm -rf "${WORK:?}/home" "${WORK:?}/data" "$WORK/bsd.log"
+  mkdir -p "$WORK/home" "$WORK/data/sub"
+  mkfile "$WORK/data/big" 300; mkfile "$WORK/data/sub/small" 40
+  PATH="$WORK/bsd:$PATH" gt5 "$WORK/data"; check_stderr "BSD first scan"
+  mkfile "$WORK/data/added" 80
+  PATH="$WORK/bsd:$PATH" gt5 "$WORK/data"; check_stderr "BSD second scan"
+  year=$(date +%Y)
+  if has "last check was on <font color=magenta>[^<]*$year" && has '\./added .*>new<' \
+      && has '\./<a href="#[0-9]*">sub</a>/'; then
+    pass "BSD-style date/stat/du: scan and diff with the last run's date"
+  else
+    fail "BSD-style date/stat/du: report or diff date wrong"
+  fi
+  if grep -q '^stat -f %m ' "$WORK/bsd.log" && grep -q '^date -r [0-9]' "$WORK/bsd.log" \
+      && grep -q '^du .*-d 6' "$WORK/bsd.log"; then
+    pass "BSD fallbacks used (stat -f, date -r SECONDS, du -d)"
+  else
+    fail "BSD fallbacks not used:"; sed 's/^/        /' "$WORK/bsd.log"
+  fi
+}
+
+#the wrappers need GNU date/stat underneath; on BSD/macOS the real tools
+#are tested directly
+if date -d @0 > /dev/null 2>&1 && stat -c %Y / > /dev/null 2>&1; then
+  make_bsd_shims; BSD_SHIMS=1
+fi
+
 tested=0
 for SHELL_CMD in sh dash bash "busybox sh" ksh mksh zsh; do
   command -v "${SHELL_CMD%% *}" > /dev/null 2>&1 || continue
@@ -209,12 +268,13 @@ for SHELL_CMD in sh dash bash "busybox sh" ksh mksh zsh; do
   run_suite
   run_security
   run_options
+  [ -z "$BSD_SHIMS" ] || run_bsd
   tested=$((tested+1))
 done
 
 echo
 if [ "$failures" -eq 0 ]; then
-  echo "PASS ($tested shells)"
+  echo "PASS ($tested shells, awk: $(basename "${GT5_AWK:-default}"))"
 else
   echo "FAIL: $failures check(s) failed"
   exit 1

@@ -1,6 +1,7 @@
 # Original gt5 by Thomas Sattler, https://gt5.sourceforge.net/
 # Modified by abdel.h for gt5-ng, 2026-09-27: added the 'check' and 'lint'
-# targets.
+# targets; 2026-09-30: portable install (no root:root owner, which fails
+# on BSD/macOS where root's group is wheel; man page and docs mode 644).
 # Licensed under the GNU General Public License version 2.
 
 TARGET  = gt5
@@ -20,14 +21,14 @@ lint:
 	shellcheck -s sh $(TARGET) tests/smoke.sh
 
 install:
-	install -o root -g root -m 755 -d $(DESTDIR)$(MAN)
-	install -o root -g root -m 755 -d $(DESTDIR)$(PREFIX)/bin
-	install -o root -g root -m 755 $(TARGET).1 $(DESTDIR)$(MAN)
-	install -o root -g root -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin
+	install -m 755 -d $(DESTDIR)$(MAN)
+	install -m 755 -d $(DESTDIR)$(PREFIX)/bin
+	install -m 644 $(TARGET).1 $(DESTDIR)$(MAN)
+	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin
 
 install_doc:
-	install -o root -g root -m 755 -d $(DESTDIR)$(SHARE)
-	install -o root -g root -m 755 README LICENSE Changelog $(DESTDIR)$(SHARE)
+	install -m 755 -d $(DESTDIR)$(SHARE)
+	install -m 644 README LICENSE Changelog $(DESTDIR)$(SHARE)
 
 uninstall:
 	rm -rf $(DESTDIR)$(PREFIX)/bin/$(TARGET)

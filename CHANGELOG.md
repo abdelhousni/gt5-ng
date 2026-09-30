@@ -16,6 +16,16 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
   creates it until the report is ready. `--diff-dir`, `--save-as` and
   `--save-du-as` report a missing argument instead of misbehaving.
 
+### Fixed (portability)
+- BSD and macOS: the time of the last run (the "last check was on …" line
+  and the time since) used GNU `date -r FILE`, which BSD/macOS `date`
+  reads as a number of seconds. gt5 now gets the file time from `stat`
+  (GNU/busybox `-c %Y`, BSD/macOS `-f %m`) and formats it with
+  `date -d @N` or `date -r N`.
+- `make install` no longer sets owner `root:root`, which fails on
+  BSD/macOS (root's group is `wheel`) and in unprivileged packaging
+  builds; the man page and docs are installed mode 644 instead of 755.
+
 ### Removed
 - The `--get-awk`, `--get-gawk`, `--get-links`, `--get-links2` and
   `--get-elinks` options. They called a function that did not exist in
@@ -60,8 +70,11 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
   plus hostile and unusual names (quotes, `%`, backslashes, HTML, regex
   characters), cleanup after SIGHUP, and option parsing.
 - `make lint` (ShellCheck; `gt5` is now clean with `-s sh`) and a GitHub
-  Actions workflow running `make lint` and `make check` under sh, dash,
-  bash, busybox sh and ksh.
+  Actions workflow: `make lint`, plus `make check` on Linux (sh, dash,
+  bash, busybox sh, ksh, zsh; with mawk, BSD awk and busybox awk) and on
+  macOS.
+- The smoke test emulates BSD `date`, `stat` and `du` on Linux, so the
+  BSD code paths are also tested there.
 
 ## upstream/1.4.0 — imported 2026-09-27
 
