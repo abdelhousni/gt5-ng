@@ -6,6 +6,9 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
 ## [Unreleased]
 
 ### Changed
+- gt5-ng is versioned separately from the original gt5, using semantic
+  versioning; the first release is 2.0.0 (see `docs/RELEASING.md`).
+  `gt5 --version` prints e.g. `gt5 v2.0.0 (gt5-ng)`.
 - Errors go to stderr, prefixed with `gt5:`, with exit status 1; usage
   errors print the help on stderr with exit status 2. New `-h`/`--help`
   prints the help on stdout and exits 0.
@@ -63,6 +66,9 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
   fixes `--save-as` with an absolute path and the empty hostname in the
   report header under dash.
 
+- `--help` and `--version` no longer fail when no text browser is
+  installed.
+
 ### Added
 - `README.md`, `NOTICE.md` and this changelog, identifying the project as an
   unofficial fork of gt5 by Thomas Sattler, recording the upstream source
@@ -77,6 +83,10 @@ original gt5 up to 1.4.0 is in [`Changelog`](Changelog), kept as released.
   Actions workflow: `make lint`, plus `make check` on Linux (sh, dash,
   bash, busybox sh, ksh, zsh; with mawk, BSD awk and busybox awk) and on
   macOS.
+- Release tooling: `scripts/release.sh` (release commit and `vX.Y.Z`
+  tag), `make check-version`, `make dist`, and a GitHub Actions workflow
+  that publishes a release with a tarball and checksum when a tag is
+  pushed.
 - The smoke test emulates BSD `date`, `stat` and `du` on Linux, so the
   BSD code paths are also tested there.
 

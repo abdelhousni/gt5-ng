@@ -11,6 +11,7 @@
 #     paths literally, and clean up temporary files on signals
 #   - portability: BSD/macOS stat and date for the time of the last run,
 #     and du without "-a -d" (not allowed together on BSD/macOS)
+#   - versioning: gt5-ng 2.0.0 and later (semantic versioning)
 #   - clean-up: remove the broken --get-* options, relax option limits,
 #     report errors on stderr with a non-zero exit status, ShellCheck clean
 # See CHANGELOG.md for the full list of changes.
@@ -19,7 +20,10 @@
 
 #The awk programs are single-quoted on purpose: '$1' etc. are awk fields.
 # shellcheck disable=SC2016
-version=1.4.0
+#gt5-ng version (semantic versioning; "-dev" between releases). This line
+#is the single source of truth: the Makefile, scripts/release.sh and
+#scripts/check-version.sh read it.
+version=2.0.0-dev
 
 #HTML-colours: ---------------------------------------------------------------
 
@@ -63,8 +67,6 @@ done
 BROWSER=$(gt5_find "$GT5_BROWSER" links links2 elinks lynx w3m)
 AWK=$(gt5_find "$GT5_AWK" "$AWK" gawk awk)
 [ "$AWK" ] || gt5_die "no awk found, please install one"
-[ "$BROWSER" ] || gt5_die "no text browser found, please install links," \
-  "elinks, lynx or w3m, or set GT5_BROWSER"
 
 #does sort work? (broken in busybox 1.4.[01])
 TEST_IN="$(printf '1 b\n2 a\n')"
@@ -262,7 +264,7 @@ while [ "$1" ]; do
 
     --save-state) SAVE_DU=1;;
 
-    --version) echo "gt5 v$version"; exit;;
+    --version) echo "gt5 v$version (gt5-ng)"; exit;;
 
     --with-mounts) unset X;;
 
@@ -288,6 +290,10 @@ while [ "$1" ]; do
   shift
 
 done
+
+#checked only now, so that --help and --version work without a browser
+[ "$BROWSER" ] || gt5_die "no text browser found, please install links," \
+  "elinks, lynx or w3m, or set GT5_BROWSER"
 
 if [ "$CD" ]; then cd "$CD" || exit 1; fi
 

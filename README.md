@@ -39,7 +39,8 @@ make check   # smoke test under every installed POSIX shell
 make lint    # ShellCheck
 ```
 
-See [`docs/AUDIT.md`](docs/AUDIT.md) for known issues and progress.
+See [`docs/AUDIT.md`](docs/AUDIT.md) for known issues and progress, and
+[`docs/RELEASING.md`](docs/RELEASING.md) for version numbers and releases.
 
 ## Usage
 

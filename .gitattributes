@@ -1,0 +1,3 @@
+# keep CI configuration out of release tarballs (git archive / make dist)
+.github export-ignore
+.gitattributes export-ignore

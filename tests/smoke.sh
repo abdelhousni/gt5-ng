@@ -113,6 +113,13 @@ expect_status() {
 run_options() {
   rm -rf "${WORK:?}/home"; mkdir -p "$WORK/home"
   expect_status 0 --help
+  #--help and --version must not need a text browser
+  if HOME="$WORK/home" GT5_BROWSER=/nonexistent/browser $SHELL_CMD "$GT5" --version 2>&1 \
+      | grep -q '^gt5 v.*(gt5-ng)$'; then
+    pass "--version works without a text browser"
+  else
+    fail "--version needs a text browser"
+  fi
   expect_status 0 --cut-at 0.10 --version
   expect_status 0 --cut-at 30 --version
   expect_status 1 --cut-at 30.5
