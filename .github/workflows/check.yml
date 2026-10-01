@@ -1,0 +1,35 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shells and tools
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y dash busybox ksh zsh original-awk shellcheck
+      - name: ShellCheck
+        run: make lint
+      - name: Smoke test, default awk (mawk)
+        run: make check
+      - name: Smoke test, BSD awk (original-awk, as on macOS/BSD)
+        run: GT5_AWK=original-awk make check
+      - name: Smoke test, busybox awk
+        run: |
+          mkdir -p "$RUNNER_TEMP/bb" && ln -s "$(command -v busybox)" "$RUNNER_TEMP/bb/awk"
+          GT5_AWK="$RUNNER_TEMP/bb/awk" make check
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test (BSD userland; sh, dash, bash, ksh, zsh)
+        run: make check
