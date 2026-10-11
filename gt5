@@ -1,0 +1,538 @@
+#!/bin/sh
+# gt5 - "where has my diskspace gone?"
+#
+# Original gt5 by Thomas Sattler, https://gt5.sourceforge.net/
+#
+# Modified by abdel.h for gt5-ng, 2026-09-27:
+#   - detect du's depth option by probing instead of parsing 'du --help'
+#   - run under any POSIX sh (e.g. dash): no bash-only syntax or variables
+#   - security: never build awk code from paths or other data (a crafted
+#     directory name could run commands), escape names in the HTML, match
+#     paths literally, and clean up temporary files on signals
+#   - portability: BSD/macOS stat and date for the time of the last run,
+#     and du without "-a -d" (not allowed together on BSD/macOS)
+#   - versioning: gt5-ng 2.0.0 and later (semantic versioning)
+#   - clean-up: remove the broken --get-* options, relax option limits,
+#     report errors on stderr with a non-zero exit status, ShellCheck clean
+# See CHANGELOG.md for the full list of changes.
+#
+# Licensed under the GNU General Public License version 2.
+
+#The awk programs are single-quoted on purpose: '$1' etc. are awk fields.
+# shellcheck disable=SC2016
+#gt5-ng version (semantic versioning; "-dev" between releases). This line
+#is the single source of truth: the Makefile, scripts/release.sh and
+#scripts/check-version.sh read it.
+version=2.0.0-dev
+
+#HTML-colours: ---------------------------------------------------------------
+
+BG=black       #background
+DIR=blue       #dir-links
+FILE=cyan      #file-links
+HR=olive       #seperators
+LAST=green     #last check was on ...
+LAST2=magenta  # ... date_string ...
+LAST3=magenta  # ... time since
+LESS=lime      #smaller files
+MORE=red       #bigger files
+NEW=yellow     #new files
+PC=darkred     #percent
+SIZE=purple    #sizes
+SUM=white      #dir-size
+TEXT=grey      #plaintext
+
+#needed binaries: ------------------------------------------------------------
+
+gt5_find() {
+  #print the path of the first of the given commands that exists
+  for cmd do
+    [ "$cmd" ] && command -v "$cmd" 2> /dev/null && return
+  done
+  return 1
+}
+
+gt5_die() {
+  #print an error message on stderr and exit
+  echo "gt5: $*" 1>&2
+  exit 1
+}
+
+unset missing
+for bin in cat cp date du grep gzip head ls mkdir mv rm sed sort tee touch; do
+  command -v "$bin" > /dev/null 2>&1 || missing="$missing $bin"
+done
+[ "$missing" ] && gt5_die "binaries are missing:$missing"
+
+BROWSER=$(gt5_find "$GT5_BROWSER" links links2 elinks lynx w3m)
+AWK=$(gt5_find "$GT5_AWK" "$AWK" gawk awk)
+[ "$AWK" ] || gt5_die "no awk found, please install one"
+
+#does sort work? (broken in busybox 1.4.[01])
+TEST_IN="$(printf '1 b\n2 a\n')"
+TEST_OUT="$(echo "$TEST_IN" | sort -k1 -k2)"
+[ "$TEST_IN" = "$TEST_OUT" ] || gt5_die "sort is broken, sorry"
+
+#some functions: -------------------------------------------------------------
+
+#the string helpers below pass their arguments through the environment:
+#'echo' (dash) and 'awk -v' interpret backslashes, and regexes interpret
+#'.', '+', '(' etc., so paths are only ever matched literally
+
+gt5_replace() {
+  #replace: ${s/a/b} (first literal match), args: string from to
+  GT5_S=$1 GT5_A=$2 GT5_B=$3 "$AWK" 'BEGIN {
+    s = ENVIRON["GT5_S"]; a = ENVIRON["GT5_A"]
+    if (a != "" && (i = index(s, a)))
+      s = substr(s, 1, i-1) ENVIRON["GT5_B"] substr(s, i+length(a))
+    print s
+  }'
+}
+
+gt5_replace_all() {
+  #replace: ${s//a/b} (literal), args: string from to
+  GT5_S=$1 GT5_A=$2 GT5_B=$3 "$AWK" 'BEGIN {
+    s = ENVIRON["GT5_S"]; a = ENVIRON["GT5_A"]; b = ENVIRON["GT5_B"]; r = ""
+    if (a != "") while (i = index(s, a)) {
+      r = r substr(s, 1, i-1) b; s = substr(s, i+length(a))
+    }
+    print r s
+  }'
+}
+
+gt5_substr_After() {
+  #replace: ${s##*/} (literal), args: string return_s_after
+  GT5_S=$1 GT5_A=$2 "$AWK" 'BEGIN {
+    s = ENVIRON["GT5_S"]; a = ENVIRON["GT5_A"]
+    if (a != "") while (i = index(s, a)) s = substr(s, i+length(a))
+    print s
+  }'
+}
+
+gt5_substr_before() {
+  #replace: ${s%/*} (literal), args: string return_s_before
+  GT5_S=$1 GT5_A=$2 "$AWK" 'BEGIN {
+    s = ENVIRON["GT5_S"]; a = ENVIRON["GT5_A"]; e = 0
+    if (a != "") while (i = index(substr(s, e+1), a)) e += i
+    print (e ? substr(s, 1, e-1) : s)
+  }'
+}
+
+gt5_tilde() {
+  #for display: abbreviate $HOME/ to ~/ (a literal "~", not an expansion)
+  # shellcheck disable=SC2088
+  gt5_replace "$1" "$HOME/" "~/"
+}
+
+gt5_timer_start() {
+  #replace: SECONDS=0 (bash-only)
+  START=$(date +%s)
+}
+
+gt5_timer() {
+  #print seconds since gt5_timer_start
+  echo $(( $(date +%s) - START ))
+}
+
+gt5_mtime() {
+  #print a file's modification time in seconds since the epoch
+  #(GNU/busybox stat, BSD/macOS stat, then GNU date as a last resort)
+  stat -c %Y "$1" 2> /dev/null ||
+  stat -f %m "$1" 2> /dev/null ||
+  date -r "$1" +%s 2> /dev/null
+}
+
+gt5_date() {
+  #print seconds since the epoch as a date (GNU/busybox date, BSD/macOS date)
+  date -d "@$1" 2> /dev/null || date -r "$1" 2> /dev/null
+}
+
+#initial stuff: --------------------------------------------------------------
+
+umask 077
+unset BIN CD CONFIGURE_OPTS CUT DATE F1 F2 LINK_FILES SAVE SAVE_DU_AS SINCE
+
+TMP=$( #there may be systems without mktemp
+  mktemp -d -q "/tmp/gt5.$$.XXXXXXXX" || {
+    dir="/tmp/gt5.$$.$(date +%s)"
+    mkdir "$dir" || exit 1
+    echo "$dir"
+  }
+)
+#remove temporary files on exit; turn signals into an exit so that the
+#EXIT trap also runs on Ctrl-C and hang-up (dash skips it otherwise)
+unset GS_TMP
+trap 'rm -rf "$TMP"; [ -z "$GS_TMP" ] || rm -f "$GS_TMP"' 0
+trap 'exit 1' HUP INT TERM
+
+SPACE="_escaped_$$_space_"
+TAB="_escaped_$$_tab_"
+DATA=$TMP/gt5.html
+DDIR=~/.gt5-diffs
+CUT_AT="0.1"
+MAX_DEPTH=5
+SAVE_DU=1
+ML=10000
+DIFFS=1
+X=x
+
+#online help: ----------------------------------------------------------------
+
+gt5_help() {
+  #usage; on stdout for --help, on stderr (exit 2) for a usage error
+  if [ "$1" = ok ]; then gt5_usage; exit 0; fi
+  gt5_usage 1>&2; exit 2
+}
+
+gt5_usage() {
+
+  echo "Syntax: gt5 [ dir | file | dir file | file file2 ] [options]"
+  echo "     dir           the directory you want to check for space used"
+  echo "     file/file2    existing du-logs (du -akx \$DIR #gz/bz2/plain)"
+  echo "   --cut-at float  don't show files below 'float'% of its parent,"
+  echo "                   default is $CUT_AT, use values between 0.01 and 30"
+  echo "   --diff-dir d    use dir d to store diffs between runs [$(gt5_tilde "$DDIR")]"
+  echo "   --discard       do not save this one for diffs, discard it"
+  echo "   --help          show this help"
+  echo "   --link-files    insert links to files for direct access"
+  echo "   --max-depth i   ignore anything deeper than i directories [$MAX_DEPTH]"
+  echo "   --max-lines i   only consider the i biggest files [$ML]"
+  echo "   --no-diffs      use this if you really do not want diffs"
+  echo "   --save-as file  DEPRECATED, use 'du', see manpage"
+  echo "   --save-state    overwrite a previous '--discard'"
+  echo "   --with-mounts   also look below mountpoints"
+  echo "   --version       show the version"
+
+}
+
+#parse Options: --------------------------------------------------------------
+
+while [ "$1" ]; do
+
+  case "$1" in
+
+    --cut-at)
+      case "$2" in
+        ''|.*|*.|*.*.*|*[!0-9.]*) false;;
+        *) "$AWK" -v c="$2" 'BEGIN { exit !(c >= 0.01 && c <= 30) }';;
+      esac || gt5_die "bad --cut-at value \"$2\", use a number between 0.01 and 30"
+      CUT_AT=$2
+      shift
+      ;;
+
+    --diff-dir)
+      [ "$2" ] || gt5_die "--diff-dir needs a directory"
+      DDIR="$2"; shift;;
+
+    --discard) unset SAVE_DU;;
+
+    -h|--help) gt5_help ok;;
+
+    --link-files) LINK_FILES=true;;
+
+    --max-depth)
+      case "$2" in
+        [0-9]|[1-9][0-9]);;
+        *) gt5_die "bad --max-depth value \"$2\", use 0-99";;
+      esac
+      MAX_DEPTH=$2
+      shift
+      ;;
+
+    --max-lines)
+      case "$2" in
+        ''|0*|*[!0-9]*|??????????*) gt5_die "bad --max-lines value \"$2\", use 1-999999999";;
+      esac
+      ML=$2
+      shift
+      ;;
+
+    --no-diffs) DIFFS=0; unset SAVE_DU;;
+
+    --save-du-as)
+      [ "$2" ] || gt5_die "--save-du-as needs a file name prefix"
+      SAVE_DU_AS="$2"; shift;;
+
+    --save-as|--keep-as)
+      [ "$2" ] || gt5_die "--save-as needs a file name"
+      case "$2" in /*) SAVE="$2";; *) SAVE="$PWD/$2";; esac
+      #check now, but only write the file once the report is ready
+      [ -d "$SAVE" ] && gt5_die "\"$2\" is a directory"
+      [ -w "$(dirname "$SAVE")" ] || gt5_die "cannot write \"$2\""
+      shift
+      ;;
+
+    --save-state) SAVE_DU=1;;
+
+    --version) echo "gt5 v$version (gt5-ng)"; exit;;
+
+    --with-mounts) unset X;;
+
+    *) #dirs/files to show:
+      unset VALID
+      if [ -d "$1" ]; then
+        [ "$CD$F2" ] && gt5_help
+        CD=$(cd "$1" && pwd) || exit 1
+        VALID=1
+      fi
+      if [ -f "$1" ]; then
+        [ "$F2" ] && gt5_help
+        [ "$F1" ] && [ "$CD" ] && gt5_help
+        [ -r "$1" ] || gt5_die "cannot read \"$1\""
+        case "$1" in "~"*|/*) unset H;; *) H="$PWD/";; esac
+        if [ "$F1" ]; then F2="$H$1"; else F1="$H$1"; fi
+        VALID=1
+      fi
+      [ "$VALID" ] || gt5_help
+      ;;
+
+  esac
+  shift
+
+done
+
+#checked only now, so that --help and --version work without a browser
+[ "$BROWSER" ] || gt5_die "no text browser found, please install links," \
+  "elinks, lynx or w3m, or set GT5_BROWSER"
+
+if [ "$CD" ]; then cd "$CD" || exit 1; fi
+
+[ "$SAVE_DU_AS" ] && {
+  du "-ak$X" 2> /dev/null | grep -v ^0 | gzip > "$SAVE_DU_AS-$(date +%y%m%d-%H%M).gz"
+  exit
+}
+
+GENERIC_STORE=$(gt5_replace_all "$PWD" "_" "__").gz
+GENERIC_STORE="$DDIR/$(gt5_replace_all "$GENERIC_STORE" "/" "_,")"
+[ -d "$DDIR" ] || mkdir "$DDIR" || exit 1
+
+if [ "$F1" ]; then
+  unset SAVE_DU
+else
+
+  [ "$CD" ] || CD=$PWD
+
+  unset H
+  F1="$(gt5_replace_all "$CD" "_" "__")"
+  F1="$DDIR/$(gt5_replace_all "$F1" "/" "_,")"
+  while [ ! -f "$F1.gz" ] && [ "$F1" != "$DDIR/" ]; do
+    H="/$(gt5_substr_After "$F1" "_,")$H"
+    F1=$(gt5_substr_before "$F1" "_,")
+  done
+
+  [ "$F1" = "$DDIR/" ] && F1="$DDIR/_,"
+
+  if [ -f "$F1.gz" ]; then CUT="$H"; F1="$F1.gz"; else unset F1; fi
+
+fi
+
+#GNU 'date -r FILE' means "seconds since the epoch" on BSD/macOS
+[ -z "$F1" ] || { SINCE=$(gt5_mtime "$F1") && DATE=$(gt5_date "$SINCE"); }
+if [ "$CD" ]; then P="$(uname -n):$PWD"; else P="file: $F1"; fi
+if [ -z "$CD$F2" ] || [ -z "$F1" ]; then DIFFS=0; fi
+[ "$CD" ] || unset LINK_FILES SAVE_DU
+
+#can du limit the depth together with -a? (-d: current GNU, --max-depth:
+#older GNU; BSD/macOS du refuses -a with -d, so there the depth limit is
+#applied by gt5_depth below instead)
+#(probe the empty $TMP, not ".", which could be huge)
+#$DEPTH is expanded unquoted below (SC2086), so "-d N" becomes two arguments
+if du -ak -d 0 "$TMP" > /dev/null 2>&1; then
+  DEPTH="-d $((MAX_DEPTH+1))"
+elif du -ak --max-depth=0 "$TMP" > /dev/null 2>&1; then
+  DEPTH="--max-depth=$((MAX_DEPTH+1))"
+else
+  unset DEPTH
+fi
+
+gt5_depth() {
+  #drop du lines deeper than max-depth+1 ("./a" is depth 1); a no-op when
+  #du already limited the depth
+  "$AWK" -v max="$((MAX_DEPTH+1))" '{
+    p = substr($0, index($0, "\t")+1)
+    if (gsub(/\//, "/", p) <= max) print
+  }'
+}
+
+{
+
+  ID=0
+  [ "$CD" ] && { gt5_timer_start
+    printf '%s' "processing \"$(gt5_tilde "$PWD")\", please be patient ... " 1>&2
+    # shellcheck disable=SC2086
+    du "-ak$X" $DEPTH 2> /dev/null | grep -v ^0 | gt5_depth | tee "$TMP/this" | sed "s,^,$ID ,"
+    ID=$((ID+1)); echo "done ${SAVE:+[$(gt5_timer)s]}" 1>&2
+  }
+
+  for f in "$F1" "$F2"; do
+
+    [ -f "$f" ] || continue
+
+    case "$f" in *gz) CAT="gzip -cd";; *bz2) CAT="bzip2 -cd";; *) CAT="cat";; esac
+
+    [ "$ID" -le "$DIFFS" ] && { gt5_timer_start
+      printf '%s' "processing \"$(gt5_tilde "$f")\" ... " 1>&2
+      $CAT "$f" | sort -k1nr -k2 | GT5_CUT=$CUT "$AWK" -v id="$ID" '
+        NR==1 { #the biggest entry is the root of this du-log
+          root = substr($0, index($0, "\t")+1); sub(/\/$/, "", root)
+          prefix = root ENVIRON["GT5_CUT"]
+        }
+        $1 { #keep entries at or below prefix (literal), relative to it
+          t = index($0, "\t"); path = substr($0, t+1); sub(/\/$/, "", path)
+          if (substr(path, 1, length(prefix)) != prefix) next
+          rest = substr(path, length(prefix)+1)
+          if (rest != "" && substr(rest, 1, 1) != "/") next
+          print id " " substr($0, 1, t-1) "\t." rest
+        }'
+      ID=$((ID+1)); echo "done ${SAVE:+[$(gt5_timer)s]}" 1>&2
+    }
+
+  done
+
+  printf '%s' "generating HTML-file ... " 1>&2
+
+} | sed 's, ,'"$SPACE"',g;s,'"$SPACE"', ,;s,	,'"$TAB"',g;s,'"$TAB"', ,' |
+
+#gt5's magic starts here:
+sort -k3 -k1,1nr |
+"$AWK" '{
+  if (!$1) {printf("%s %s %s\n", $2, (on==$3?os:-1), $3)}
+  else {os=$2; on=$3} on=$3
+}' | sort -k1,1nr -k3 | "$AWK" -v max_lines="$ML" '
+  NR>max_lines+0{exit}
+  {
+    if (NR==1) {printf("%s %s\n",$0,$0)}
+    me=$3; size[me]=$1; osize[me]=$2
+    e=0; while (i=index(substr(me,e+1),"/")) e+=i
+    if (e) {p=substr(me,1,e-1); printf("%s %s %s %s\n",size[p],osize[p],p,$0)}
+  }
+' | sort -k1,1n -k3,3r -k4,4n |
+GT5_P=$P GT5_DATE=$DATE GT5_F2=$F2 GT5_PWD=$PWD GT5_LINK_FILES=$LINK_FILES \
+GT5_HTML_CHARSET=${GT5_CHARSET:-$LANG} GT5_VERSION=$version \
+"$AWK" -v now="$(date +%s)" -v since="${SINCE:-0}" -v diffs="$DIFFS" \
+  -v cut_at="$CUT_AT" -v max_depth="$MAX_DEPTH" -v max_lines="$ML" \
+  -v space="$SPACE" -v tab="$TAB" '
+  #every string from outside (paths, file names, dates) comes in through
+  #ENVIRON or the input, and is escaped with html() or url() before output
+  function html(s) {
+    gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s)
+    gsub(/>/, "\\&gt;", s); gsub(/"/, "\\&quot;", s)
+    return s
+  }
+  function url(s) {
+    gsub(space, " ", s); gsub(tab, "\t", s)
+    gsub(/%/, "%25", s); gsub(/ /, "%20", s); gsub(/\t/, "%09", s)
+    gsub(/"/, "%22", s); gsub(/#/, "%23", s); gsub(/\?/, "%3F", s)
+    gsub(/&/, "%26", s); gsub(/</, "%3C", s); gsub(/>/, "%3E", s)
+    return s
+  }
+  BEGIN{
+    P = html(ENVIRON["GT5_P"]); DATE = html(ENVIRON["GT5_DATE"])
+    F2 = ENVIRON["GT5_F2"]; ROOT = ENVIRON["GT5_PWD"]
+    LINK_FILES = ENVIRON["GT5_LINK_FILES"] != ""
+    VERSION = html(ENVIRON["GT5_VERSION"])
+    CHARSET = html(ENVIRON["GT5_HTML_CHARSET"])
+    diffs += 0; cut_at += 0
+    H=now-since
+    print "</pre></body></html>"
+    s=H%60; H/=60; m=H%60; H/=60; h=H%24; d=H/24
+    timespan=sprintf("%id, %02i:%02i:%02i",d,h,m,s)
+  }
+  function i2h(i) {
+    E="K"; i+=0 #forcing i being a number ...
+    if (i>999) { i/=1024; E="M" }
+    if (i>999) { i/=1024; E="G" }
+    if (i>999) { i/=1024; E="T" }
+    if (i<9.95) return sprintf("%.1f%cB",i,E);
+    else return sprintf("%.0f%cB",i,E);
+  }
+  function directory (p,ps,pos,pf) {
+    if (!p) return #no parent on first call
+    printf "\n%s/:   [<font color='$SUM'>%s",html(p),i2h(ps)
+    printf "</font> in %d files or directories]  ",children[p]
+    if (diffs) {
+      if (pos==-1) printf "<font color='$NEW'>new</font>"; else {
+        if (ps<pos) printf "<font color='$LESS'>-%s</font>",i2h(pos-ps)
+        if (ps>pos) printf "<font color='$MORE'>+%s</font>",i2h(ps-pos)
+      }
+    }
+    print "\n<font color='$HR'><hr></font></a>"
+    if (diffs && F2=="") {
+      printf "<font color='$LAST'> last check was on <font"
+      printf " color='$LAST2'>%s</font> (i.e. <font color=",DATE
+      printf "'$LAST3'>%s</font> ago)</font>\n",timespan
+    }
+    printf "<a name=\"%d\">gt5 v%s</a> (%s):   [cut:",(nr[p]=x++),VERSION,P
+    print cut_at "% depth:" max_depth " lines:" max_lines "]"
+    if (pf) for (i=0; i<16; ++i) print "\n\n\n\n\n\n\n\n"
+  }
+  $1>0{ #division by zero ...
+    if (op!=$3) directory(op,ops,opos,1)
+    ops=$1; opos=$2; op=$3; pz=100*$4/ops
+    e=0; while (j=index(substr($6,e+1),"/")) e+=j; s=html(substr($6,e+1))
+    children[$3]++; if (children[$6]) s="<a href=\"#"nr[$6]"\">"s"</a>/"
+    else if (LINK_FILES) {
+      h="<a href=\"" url(ROOT substr($6,2))
+      s=h"\"><font color='$FILE'>"s"</font></a>"
+    }
+    if (pz>=cut_at && $6!=".") {
+      printf "<font color='$SIZE'>%6s</font> ",i2h($4)
+      printf "[<font color='$PC'>%5.2f%%</font>] ./%s  ",pz,s
+      if (diffs) {
+        if ($5==-1) printf "<font color='$NEW'>new</font>"; else {
+          if ($4<$5) printf "<font color='$LESS'>-%s</font>",i2h($5-$4)
+          if ($4>$5) printf "<font color='$MORE'>+%s</font>",i2h($4-$5)
+        }
+      }; printf "\n"
+    }
+  }
+  END{
+    directory(op,ops,opos)
+    if (!x) print "     directory seems to be empty\n\n\ngt5 v" VERSION " (" P ")"
+    printf "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html;"
+    printf " charset=%s\"></head><body bgcolor='$BG'",CHARSET
+    print " text='$TEXT' link='$DIR'><pre>"
+  }
+' | "$AWK" -v space="$SPACE" -v tab="$TAB" '
+  {gsub(space, " "); gsub(tab, "\t"); b[NR]=$0}
+  END{for (i=NR; i; --i) print(b[i])}
+' > "$DATA"
+
+echo "done (size: $(gt5_substr_before "$(ls -sh "$DATA")" " "))" 1>&2
+
+[ "$SAVE_DU" ] && {
+
+  gt5_timer_start
+  GS_TMP="${GENERIC_STORE}.$$.tmp"
+  touch "$GS_TMP" || exit 1
+  gzip < "$TMP/this" > "$GS_TMP" &
+  printf '%s' "saving state information ... " 1>&2
+
+  if [ "$SAVE" ]; then
+    wait; echo "done ${SAVE:+[$(gt5_timer)s]}" 1>&2
+    mv "$GS_TMP" "$GENERIC_STORE"
+  else
+    echo "(background)" 1>&2
+  fi
+
+}
+
+if [ "$SAVE" ]; then
+
+  cat "$DATA" > "$SAVE" || exit 1
+  printf '\nYour data was successfully saved as "%s".\n' "$SAVE"
+  echo "WARNING: \"--save-as\" is deprecated, see manpage."
+
+else
+
+  echo "starting browser ($(gt5_tilde "$BROWSER")) ... " 1>&2
+  cp -l "$DATA" ~/.gt5.html 2> /dev/null || cp "$DATA" ~/.gt5.html || exit 1
+  "$BROWSER" "$DATA"
+
+  [ "$SAVE_DU" ] && {
+    wait # for $TMP/this beeing packed ...
+    mv "$GS_TMP" "$GENERIC_STORE"
+  }
+
+fi
+

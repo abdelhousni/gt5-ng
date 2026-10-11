@@ -1,0 +1,49 @@
+name: release
+
+# Publish a GitHub release when a vX.Y.Z tag is pushed (see scripts/release.sh
+# and docs/RELEASING.md).
+on:
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y dash shellcheck
+      - name: Tag matches the version in gt5
+        run: |
+          version=$(sed -n 's/^version=//p' gt5)
+          echo "tag $GITHUB_REF_NAME, gt5 version $version"
+          test "$GITHUB_REF_NAME" = "v$version"
+          make check-version
+      - name: Lint and test
+        run: make lint check
+      - name: Build tarball and checksum
+        run: |
+          version=$(sed -n 's/^version=//p' gt5)
+          make dist
+          sha256sum "gt5-ng-$version.tar.gz" > "gt5-ng-$version.tar.gz.sha256"
+          cat "gt5-ng-$version.tar.gz.sha256"
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version=$(sed -n 's/^version=//p' gt5)
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version=//p' gt5)
+          gh release create "$GITHUB_REF_NAME" \
+            --title "gt5-ng $version" --notes-file notes.md \
+            "gt5-ng-$version.tar.gz" "gt5-ng-$version.tar.gz.sha256"
