@@ -11,8 +11,8 @@ gt5-ng uses [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
 
 The first gt5-ng release is **2.0.0**. It follows the original gt5 1.4.0
 (2007) with a major bump, because gt5-ng removed options and changed exit
-statuses. It also stays above Debian's `1.5.0~20111220+bzr29` package, an
-unreleased upstream snapshot, so distributions can upgrade cleanly.
+statuses. It also stays above Debian's `1.5.0~20111220+bzr29` package, a
+snapshot of Jari Aalto's branch, so distributions can upgrade cleanly.
 
 Between releases the version is `X.Y.Z-dev`, the next planned patch
 release. A build from an untagged commit therefore never claims to be a
